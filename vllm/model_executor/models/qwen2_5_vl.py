@@ -590,7 +590,7 @@ class Qwen2_5_VisionTransformer(nn.Module):
             dtype=self._vision_dtype,
         )
 
-        norm_layer = partial(RMSNorm, eps=norm_eps)
+        norm_layer = partial(RMSNorm, eps=norm_eps, dtype=self._vision_dtype)
         head_dim = self.hidden_size // self.num_heads
         self.rotary_pos_emb = Qwen2_5_VisionRotaryEmbedding(head_dim // 2)
 
