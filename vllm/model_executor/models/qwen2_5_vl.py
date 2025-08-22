@@ -62,7 +62,7 @@ from vllm.model_executor.models.module_mapping import MultiModelKeys
 from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.multimodal.inputs import MultiModalFieldConfig
 from vllm.multimodal.utils import run_dp_sharded_mrope_vision_model
-from vllm.platforms import _Backend
+from vllm.platforms import _Backend, current_platform
 from vllm.sequence import IntermediateTensors
 from vllm.transformers_utils.config import uses_mrope
 
@@ -567,6 +567,19 @@ class Qwen2_5_VisionTransformer(nn.Module):
         self.fullatt_block_indexes = vision_config.fullatt_block_indexes
         self.spatial_merge_unit = self.spatial_merge_size**2
 
+        # Check GPU capability and determine vision dtype
+        # Fall back to float32 if GPU doesn't support bfloat16
+        if not current_platform.has_device_capability(80):
+            self._vision_dtype = torch.float32
+            if hasattr(vision_config, 'torch_dtype') and vision_config.torch_dtype == torch.bfloat16:
+                logger.warning(
+                    "GPU does not support bfloat16 (requires compute capability >= 8.0). "
+                    "Using float32 for vision components instead."
+                )
+        else:
+            # Use the original dtype if GPU supports bfloat16
+            self._vision_dtype = getattr(vision_config, 'torch_dtype', torch.bfloat16)
+
         self.patch_embed = Qwen2_5_VisionPatchEmbed(
             patch_size=patch_size,
             temporal_patch_size=temporal_patch_size,
@@ -603,6 +616,9 @@ class Qwen2_5_VisionTransformer(nn.Module):
 
     @property
     def dtype(self) -> torch.dtype:
+        # Return the GPU-capability-aware dtype for vision components
+        if hasattr(self, '_vision_dtype'):
+            return self._vision_dtype
         return self.patch_embed.proj.weight.dtype
 
     @property
@@ -801,6 +817,12 @@ class Qwen2_5_VisionTransformer(nn.Module):
         loaded_params: set[str] = set()
 
         for name, loaded_weight in weights:
+            # Convert weight dtype if GPU doesn't support bfloat16 and weight is bfloat16
+            if (hasattr(self, '_vision_dtype') and 
+                self._vision_dtype == torch.float32 and 
+                loaded_weight.dtype == torch.bfloat16):
+                loaded_weight = loaded_weight.to(torch.float32)
+            
             for (param_name, weight_name, shard_id) in stacked_params_mapping:
                 if weight_name not in name:
                     continue
