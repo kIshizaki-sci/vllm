@@ -441,6 +441,7 @@ class Qwen2_5_VisionPatchEmbed(nn.Module):
         temporal_patch_size: int = 2,
         in_channels: int = 3,
         hidden_size: int = 1152,
+        dtype: Optional[torch.dtype] = None,
     ) -> None:
         super().__init__()
         self.patch_size = patch_size
@@ -452,7 +453,8 @@ class Qwen2_5_VisionPatchEmbed(nn.Module):
                               hidden_size,
                               kernel_size=kernel_size,
                               stride=kernel_size,
-                              bias=False)
+                              bias=False,
+                              dtype=dtype)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         L, C = x.shape
@@ -585,6 +587,7 @@ class Qwen2_5_VisionTransformer(nn.Module):
             temporal_patch_size=temporal_patch_size,
             in_channels=in_channels,
             hidden_size=self.hidden_size,
+            dtype=self._vision_dtype,
         )
 
         norm_layer = partial(RMSNorm, eps=norm_eps)
