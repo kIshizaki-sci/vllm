@@ -20,6 +20,83 @@ def test_vision_dtype_fallback():
     print("Testing Qwen2.5-VL Vision Component Dtype Handling")
     print("=" * 60)
     
+    # Initialize parallel state for testing
+    import os
+    os.environ['RANK'] = '0'
+    os.environ['LOCAL_RANK'] = '0'
+    os.environ['WORLD_SIZE'] = '1'
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '12355'
+    
+    from vllm.distributed import parallel_state
+    
+    try:
+        # Try to get the tensor parallel group, if it fails, initialize it
+        parallel_state.get_tp_group()
+    except (AssertionError, AttributeError):
+        # Initialize with default settings for testing
+        import torch
+        import torch.distributed as dist
+        
+        # Initialize process group if not already initialized
+        if not dist.is_initialized():
+            try:
+                dist.init_process_group(backend="gloo", init_method="env://")
+            except Exception:
+                # If gloo fails, try with a file store
+                import tempfile
+                temp_dir = tempfile.mkdtemp()
+                init_file = os.path.join(temp_dir, "pg_init")
+                dist.init_process_group(
+                    backend="gloo",
+                    init_method=f"file://{init_file}",
+                    world_size=1,
+                    rank=0
+                )
+        
+        # Initialize vLLM parallel state using the correct API
+        try:
+            # Try the newer API first
+            from vllm.distributed.parallel_state import (
+                init_distributed_environment,
+                init_model_parallel_group
+            )
+            
+            # Initialize world group first
+            if not hasattr(parallel_state, '_WORLD') or parallel_state._WORLD is None:
+                init_distributed_environment()
+            
+            # Then initialize model parallel groups
+            init_model_parallel_group(
+                model_parallel_size=1,
+                backend="gloo"
+            )
+        except (ImportError, TypeError) as e:
+            # Fallback to direct initialization
+            try:
+                # Set up the groups manually
+                world_group = dist.group.WORLD
+                
+                # Initialize global variables directly
+                parallel_state._WORLD = world_group
+                parallel_state._TP = world_group  # Use world group for TP when size=1
+                parallel_state._PP = world_group  # Use world group for PP when size=1
+                
+                # Set ranks and sizes
+                parallel_state._TP_RANK = 0
+                parallel_state._PP_RANK = 0
+                parallel_state._TP_SIZE = 1
+                parallel_state._PP_SIZE = 1
+            except Exception:
+                # Last resort: mock the parallel state
+                from unittest.mock import MagicMock
+                mock_group = MagicMock()
+                mock_group.world_size = 1
+                mock_group.rank = 0
+                parallel_state._TP = mock_group
+                parallel_state._PP = mock_group
+                parallel_state._WORLD = mock_group
+    
     # Mock the platform to simulate different GPU capabilities
     with patch('vllm.model_executor.models.qwen2_5_vl.current_platform') as mock_platform:
         
@@ -151,6 +228,13 @@ def test_weight_conversion():
     print("Testing Weight Conversion During Loading")
     print("=" * 60)
     
+    # Initialize parallel state for testing if not already initialized
+    from vllm.distributed import parallel_state
+    try:
+        parallel_state.get_tp_group()
+    except (AssertionError, AttributeError):
+        pass  # Already initialized in the first test
+    
     with patch('vllm.model_executor.models.qwen2_5_vl.current_platform') as mock_platform:
         mock_platform.has_device_capability.return_value = False  # No bfloat16 support
         
@@ -218,6 +302,13 @@ def test_merger_component():
     print("Testing Merger Component Dtype Handling")
     print("=" * 60)
     
+    # Initialize parallel state for testing if not already initialized
+    from vllm.distributed import parallel_state
+    try:
+        parallel_state.get_tp_group()
+    except (AssertionError, AttributeError):
+        pass  # Already initialized in the first test
+    
     with patch('vllm.model_executor.models.qwen2_5_vl.current_platform') as mock_platform:
         mock_platform.has_device_capability.return_value = False  # No bfloat16 support
         
@@ -258,6 +349,10 @@ def test_merger_component():
 
 if __name__ == "__main__":
     try:
+        # Set environment variables for testing
+        import os
+        os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+        
         # Run tests
         test_vision_dtype_fallback()
         test_weight_conversion()
