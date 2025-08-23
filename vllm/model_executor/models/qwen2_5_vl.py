@@ -820,10 +820,10 @@ class Qwen2_5_VisionTransformer(nn.Module):
         loaded_params: set[str] = set()
 
         for name, loaded_weight in weights:
-            # Convert weight dtype if GPU doesn't support bfloat16 and weight is bfloat16
+            # Convert weight dtype if GPU doesn't support bfloat16 and we're using float32 for vision
             if (hasattr(self, '_vision_dtype') and 
                 self._vision_dtype == torch.float32 and 
-                loaded_weight.dtype == torch.bfloat16):
+                loaded_weight.dtype in (torch.bfloat16, torch.float16)):
                 loaded_weight = loaded_weight.to(torch.float32)
             
             for (param_name, weight_name, shard_id) in stacked_params_mapping:
