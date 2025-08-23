@@ -1032,6 +1032,8 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
             image_embeds = image_input["image_embeds"].type(self.visual.dtype)
         else:
             pixel_values = image_input["pixel_values"]
+            # Ensure input tensor matches the vision model's dtype (now float32)
+            pixel_values = pixel_values.to(self.visual.dtype)
 
             # For debugging: Log input pixel_values info
             logger.info(f"[DEBUG] Processing pixel_values with shape {pixel_values.shape} and dtype {pixel_values.dtype}")
@@ -1069,6 +1071,8 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
             video_embeds = video_input["video_embeds"].type(self.visual.dtype)
         else:
             pixel_values_videos = video_input["pixel_values_videos"]
+            # Ensure input tensor matches the vision model's dtype (now float32)
+            pixel_values_videos = pixel_values_videos.to(self.visual.dtype)
 
             # For debugging: Log input pixel_values_videos info
             logger.info(f"[DEBUG] Processing pixel_values_videos with shape {pixel_values_videos.shape} and dtype {pixel_values_videos.dtype}")
