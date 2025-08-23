@@ -1238,8 +1238,21 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
         skip_prefixes = []
         if self.visual is None:
             skip_prefixes.extend(["visual."])
+        
+        # Convert vision weights dtype if needed for GPU compatibility
+        def convert_vision_weights(weights_iter):
+            for name, weight in weights_iter:
+                # Check if this is a vision weight and needs dtype conversion
+                if (name.startswith("visual.") and 
+                    self.visual is not None and 
+                    hasattr(self.visual, '_vision_dtype') and 
+                    self.visual._vision_dtype == torch.float32 and 
+                    weight.dtype in (torch.bfloat16, torch.float16)):
+                    weight = weight.to(torch.float32)
+                yield name, weight
+        
         loader = AutoWeightsLoader(self, skip_prefixes=skip_prefixes)
-        return loader.load_weights(weights, mapper=self.hf_to_vllm_mapper)
+        return loader.load_weights(convert_vision_weights(weights), mapper=self.hf_to_vllm_mapper)
 
     def get_mm_mapping(self) -> MultiModelKeys:
         """
