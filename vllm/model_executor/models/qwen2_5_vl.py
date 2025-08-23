@@ -881,8 +881,8 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
         self.config = config
         self.multimodal_config = multimodal_config
 
-        # For debugging: Log original dtype
-        logger.info(f"[DEBUG] Original vllm_config.dtype: {vllm_config.dtype}")
+        # For debugging: Log original dtype from model_config
+        logger.info(f"[DEBUG] Original vllm_config.model_config.dtype: {vllm_config.model_config.dtype}")
 
         if multimodal_config.get_limit_per_prompt("image") or \
             multimodal_config.get_limit_per_prompt("video"):
@@ -912,7 +912,7 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
             architectures=["Qwen2ForCausalLM"],
         )
         # For debugging: Log language model parameter dtypes after initialization
-        logger.info(f"[DEBUG] Initializing language_model with config dtype: {vllm_config.dtype}")
+        logger.info(f"[DEBUG] Initializing language_model with config dtype: {vllm_config.model_config.dtype}")
         for name, param in self.language_model.named_parameters():
             if "model.embed_tokens.weight" in name or "model.layers.0.self_attn.q_proj.weight" in name:
                 logger.info(f"[DEBUG]   - language_model.{name}: {param.dtype}")
