@@ -881,6 +881,9 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
         self.config = config
         self.multimodal_config = multimodal_config
 
+        # For debugging: Log original dtype from model_config
+        logger.info(f"[DEBUG] Original vllm_config.model_config.dtype: {vllm_config.model_config.dtype}")
+
         if multimodal_config.get_limit_per_prompt("image") or \
             multimodal_config.get_limit_per_prompt("video"):
             self.visual = Qwen2_5_VisionTransformer(
@@ -891,14 +894,28 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                 prefix=maybe_prefix(prefix, "visual"),
                 use_data_parallel=self.use_data_parallel,
             )
+            # Cast the vision model to float32
+            self.visual.to(torch.float32)
+            # For debugging: Log vision model parameter dtypes
+            logger.info("[DEBUG] Casted Qwen2_5_VisionTransformer to float32.")
+            for name, param in self.visual.named_parameters():
+                if "patch_embed.proj.weight" in name or "blocks.0.attn.qkv.weight" in name:
+                    logger.info(f"[DEBUG]   - visual.{name}: {param.dtype}")
         else:
             self.visual = None
 
+        # The language model will be initialized with vllm_config.dtype
+        # (expected to be bfloat16)
         self.language_model = init_vllm_registered_model(
             vllm_config=vllm_config,
             prefix=maybe_prefix(prefix, "language_model"),
             architectures=["Qwen2ForCausalLM"],
         )
+        # For debugging: Log language model parameter dtypes after initialization
+        logger.info(f"[DEBUG] Initializing language_model with config dtype: {vllm_config.model_config.dtype}")
+        for name, param in self.language_model.named_parameters():
+            if "model.embed_tokens.weight" in name or "model.layers.0.self_attn.q_proj.weight" in name:
+                logger.info(f"[DEBUG]   - language_model.{name}: {param.dtype}")
 
         self.make_empty_intermediate_tensors = (
             self.language_model.make_empty_intermediate_tensors)
@@ -1008,10 +1025,18 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
         assert grid_thw.ndim == 2
         grid_thw_list = grid_thw.tolist()
 
+        # For debugging: Log vision model's expected dtype
+        logger.info(f"[DEBUG] Vision model's internal dtype: {self.visual.dtype}")
+
         if image_input["type"] == "image_embeds":
             image_embeds = image_input["image_embeds"].type(self.visual.dtype)
         else:
             pixel_values = image_input["pixel_values"]
+            # Ensure input tensor matches the vision model's dtype (now float32)
+            pixel_values = pixel_values.to(self.visual.dtype)
+
+            # For debugging: Log input pixel_values info
+            logger.info(f"[DEBUG] Processing pixel_values with shape {pixel_values.shape} and dtype {pixel_values.dtype}")
 
             if self.use_data_parallel:
                 return run_dp_sharded_mrope_vision_model(
@@ -1019,6 +1044,9 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
             else:
                 image_embeds = self.visual(pixel_values,
                                            grid_thw=grid_thw_list)
+
+        # For debugging: Log vision model's output embeddings info
+        logger.info(f"[DEBUG] Vision model output embeddings (image) dtype: {image_embeds.dtype}")
 
         # Split concatenated embeddings for each image item.
         # Using prod on grid_thw_list instead of grid_thw.prod avoids CUDA sync
@@ -1036,16 +1064,28 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
         assert grid_thw.ndim == 2
         grid_thw_list = grid_thw.tolist()
 
+        # For debugging: Log vision model's expected dtype
+        logger.info(f"[DEBUG] Vision model's internal dtype: {self.visual.dtype}")
+
         if video_input["type"] == "video_embeds":
             video_embeds = video_input["video_embeds"].type(self.visual.dtype)
         else:
             pixel_values_videos = video_input["pixel_values_videos"]
+            # Ensure input tensor matches the vision model's dtype (now float32)
+            pixel_values_videos = pixel_values_videos.to(self.visual.dtype)
+
+            # For debugging: Log input pixel_values_videos info
+            logger.info(f"[DEBUG] Processing pixel_values_videos with shape {pixel_values_videos.shape} and dtype {pixel_values_videos.dtype}")
+
             if self.use_data_parallel:
                 return run_dp_sharded_mrope_vision_model(
                     self.visual, pixel_values_videos, grid_thw_list)
             else:
                 video_embeds = self.visual(pixel_values_videos,
                                            grid_thw=grid_thw_list)
+
+        # For debugging: Log vision model's output embeddings info
+        logger.info(f"[DEBUG] Vision model output embeddings (video) dtype: {video_embeds.dtype}")
 
         # Split concatenated embeddings for each video item.
         merge_size = self.visual.spatial_merge_size
@@ -1104,11 +1144,21 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
         multimodal_embeddings: Optional[MultiModalEmbeddings] = None,
     ) -> torch.Tensor:
         inputs_embeds = self.language_model.get_input_embeddings(input_ids)
+
+        # For debugging: Log dtypes before merging
+        logger.info(f"[DEBUG] Language model initial inputs_embeds.dtype: {inputs_embeds.dtype}")
+
         if multimodal_embeddings is not None \
             and len(multimodal_embeddings) != 0:
+            # For debugging: Log multimodal embeddings dtypes
+            mm_embeds_dtypes = [e.dtype for e in multimodal_embeddings]
+            logger.info(f"[DEBUG] Merging multimodal embeddings with dtypes: {mm_embeds_dtypes}")
+
             inputs_embeds = merge_multimodal_embeddings(
                 input_ids, inputs_embeds, multimodal_embeddings,
                 [self.config.image_token_id, self.config.video_token_id])
+            # For debugging: Log dtype after merging
+            logger.info(f"[DEBUG] Final inputs_embeds.dtype after merging: {inputs_embeds.dtype}")
         return inputs_embeds
 
     def get_input_embeddings_v0(
