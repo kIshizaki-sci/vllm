@@ -819,14 +819,17 @@ class Qwen2_5_VisionTransformer(nn.Module):
         params_dict = dict(self.named_parameters(remove_duplicate=False))
         loaded_params: set[str] = set()
 
-        for name, loaded_weight in weights:
+        # Convert all weights to list first to ensure we can iterate multiple times
+        weights_list = list(weights)
+        
+        for name, loaded_weight in weights_list:
             # Convert weight dtype if GPU doesn't support bfloat16 and we're using float32 for vision
             original_dtype = loaded_weight.dtype
             if (hasattr(self, '_vision_dtype') and 
                 self._vision_dtype == torch.float32 and 
                 loaded_weight.dtype in (torch.bfloat16, torch.float16)):
                 loaded_weight = loaded_weight.to(torch.float32)
-                logger.info(f"Converting vision weight {name} from {original_dtype} to float32 for GPU compatibility")
+                logger.info(f"Converting vision transformer weight {name} from {original_dtype} to float32 for GPU compatibility")
             
             for (param_name, weight_name, shard_id) in stacked_params_mapping:
                 if weight_name not in name:
@@ -1250,7 +1253,9 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                     hasattr(self.visual, '_vision_dtype') and 
                     self.visual._vision_dtype == torch.float32 and 
                     weight.dtype in (torch.bfloat16, torch.float16)):
+                    original_dtype = weight.dtype
                     weight = weight.to(torch.float32)
+                    logger.info(f"Converting vision weight {name} from {original_dtype} to float32 for GPU compatibility")
                 yield name, weight
         
         loader = AutoWeightsLoader(self, skip_prefixes=skip_prefixes)
