@@ -485,6 +485,7 @@ class Qwen2_5_VisionPatchMerger(nn.Module):
         quant_config: Optional[QuantizationConfig] = None,
         prefix: str = "",
         use_data_parallel: bool = False,
+        params_dtype: Optional[torch.dtype] = None,
     ) -> None:
         super().__init__()
         self.hidden_size = context_dim * (spatial_merge_size**2)
@@ -500,12 +501,14 @@ class Qwen2_5_VisionPatchMerger(nn.Module):
             cls_fc1(self.hidden_size,
                     self.hidden_size,
                     bias=True,
+                    params_dtype=params_dtype,
                     quant_config=quant_config,
                     prefix=f"{prefix}.mlp.0"),
             nn.GELU(),
             cls_fc2(self.hidden_size,
                     d_model,
                     bias=True,
+                    params_dtype=params_dtype,
                     quant_config=quant_config,
                     prefix=f"{prefix}.mlp.2"),
         ])
@@ -627,6 +630,7 @@ class Qwen2_5_VisionTransformer(nn.Module):
             quant_config=quant_config,
             prefix=f"{prefix}.merger",
             use_data_parallel=use_data_parallel,
+            params_dtype=self._vision_dtype,
         )
         self.attn_backend: _Backend = get_vit_attn_backend(support_fa=True)
 
