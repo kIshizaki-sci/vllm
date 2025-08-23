@@ -176,7 +176,8 @@ class Qwen2_5_VisionMLP(nn.Module):
                  act_fn: Callable[[torch.Tensor], torch.Tensor] = F.silu,
                  quant_config: Optional[QuantizationConfig] = None,
                  prefix: str = "",
-                 use_data_parallel: bool = False):
+                 use_data_parallel: bool = False,
+                 params_dtype: Optional[torch.dtype] = None):
         super().__init__()
         cls_gate_up_proj = (MergedReplicatedLinear if use_data_parallel else
                             MergedColumnParallelLinear)
@@ -184,6 +185,7 @@ class Qwen2_5_VisionMLP(nn.Module):
             input_size=in_features,
             output_sizes=[hidden_features] * 2,  # [gate_proj, up_proj]
             bias=bias,
+            params_dtype=params_dtype,
             quant_config=quant_config,
             prefix=f"{prefix}.gate_up_proj")
 
@@ -192,6 +194,7 @@ class Qwen2_5_VisionMLP(nn.Module):
         self.down_proj = cls_down_proj(hidden_features,
                                        in_features,
                                        bias=bias,
+                                       params_dtype=params_dtype,
                                        quant_config=quant_config,
                                        prefix=f"{prefix}.down_proj")
         self.act_fn = act_fn
@@ -232,6 +235,7 @@ class Qwen2_5_VisionAttention(nn.Module):
         quant_config: Optional[QuantizationConfig] = None,
         prefix: str = "",
         use_data_parallel: bool = False,
+        params_dtype: Optional[torch.dtype] = None,
     ) -> None:
         super().__init__()
         # Per attention head and per partition values.
@@ -242,12 +246,13 @@ class Qwen2_5_VisionAttention(nn.Module):
             projection_size, num_heads)
         self.num_attention_heads_per_partition = dist_utils.divide(
             num_heads, self.tp_size)
-
+        
         if use_data_parallel:
             self.qkv = ReplicatedLinear(embed_dim,
                                         self.hidden_size_per_attention_head *
                                         3 * num_heads,
                                         bias=True,
+                                        params_dtype=params_dtype,
                                         quant_config=quant_config,
                                         prefix=f"{prefix}.qkv")
 
@@ -258,6 +263,7 @@ class Qwen2_5_VisionAttention(nn.Module):
                 total_num_heads=num_heads,
                 total_num_kv_heads=num_heads,
                 bias=True,
+                params_dtype=params_dtype,
                 quant_config=quant_config,
                 prefix=f"{prefix}.qkv")
 
@@ -265,6 +271,7 @@ class Qwen2_5_VisionAttention(nn.Module):
                     if use_data_parallel else RowParallelLinear)
         self.proj = cls_proj(input_size=projection_size,
                              output_size=embed_dim,
+                             params_dtype=params_dtype,
                              quant_config=quant_config,
                              prefix=f"{prefix}.proj")
 
@@ -394,6 +401,7 @@ class Qwen2_5_VisionBlock(nn.Module):
         quant_config: Optional[QuantizationConfig] = None,
         prefix: str = "",
         use_data_parallel: bool = False,
+        params_dtype: Optional[torch.dtype] = None,
     ) -> None:
         super().__init__()
         if norm_layer is None:
@@ -406,14 +414,16 @@ class Qwen2_5_VisionBlock(nn.Module):
             projection_size=dim,
             quant_config=quant_config,
             prefix=f"{prefix}.attn",
-            use_data_parallel=use_data_parallel)
+            use_data_parallel=use_data_parallel,
+            params_dtype=params_dtype)
         self.mlp = Qwen2_5_VisionMLP(dim,
                                      mlp_hidden_dim,
                                      act_fn=act_fn,
                                      bias=True,
                                      quant_config=quant_config,
                                      prefix=f"{prefix}.mlp",
-                                     use_data_parallel=use_data_parallel)
+                                     use_data_parallel=use_data_parallel,
+                                     params_dtype=params_dtype)
 
     def forward(
             self,
@@ -605,7 +615,8 @@ class Qwen2_5_VisionTransformer(nn.Module):
                                 norm_layer=norm_layer,
                                 quant_config=quant_config,
                                 prefix=f"{prefix}.blocks.{layer_idx}",
-                                use_data_parallel=use_data_parallel)
+                                use_data_parallel=use_data_parallel,
+                                params_dtype=self._vision_dtype)
             for layer_idx in range(depth)
         ])
         self.merger = Qwen2_5_VisionPatchMerger(
