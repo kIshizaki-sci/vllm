@@ -573,14 +573,16 @@ class Qwen2_5_VisionTransformer(nn.Module):
         # Fall back to float32 if GPU doesn't support bfloat16
         if not current_platform.has_device_capability(80):
             self._vision_dtype = torch.float32
-            if hasattr(vision_config, 'torch_dtype') and vision_config.torch_dtype == torch.bfloat16:
-                logger.warning(
-                    "GPU does not support bfloat16 (requires compute capability >= 8.0). "
-                    "Using float32 for vision components instead."
-                )
+            logger.warning(
+                "GPU does not support bfloat16 (requires compute capability >= 8.0). "
+                "Using float32 for vision components instead."
+            )
+            if hasattr(vision_config, 'torch_dtype'):
+                logger.info(f"Original vision config dtype: {vision_config.torch_dtype}, using float32 instead")
         else:
             # Use the original dtype if GPU supports bfloat16
             self._vision_dtype = getattr(vision_config, 'torch_dtype', torch.bfloat16)
+            logger.info(f"GPU supports bfloat16, using vision dtype: {self._vision_dtype}")
 
         self.patch_embed = Qwen2_5_VisionPatchEmbed(
             patch_size=patch_size,
@@ -819,10 +821,7 @@ class Qwen2_5_VisionTransformer(nn.Module):
         params_dict = dict(self.named_parameters(remove_duplicate=False))
         loaded_params: set[str] = set()
 
-        # Convert all weights to list first to ensure we can iterate multiple times
-        weights_list = list(weights)
-        
-        for name, loaded_weight in weights_list:
+        for name, loaded_weight in weights:
             # Convert weight dtype if GPU doesn't support bfloat16 and we're using float32 for vision
             original_dtype = loaded_weight.dtype
             if (hasattr(self, '_vision_dtype') and 
@@ -1244,22 +1243,8 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
         if self.visual is None:
             skip_prefixes.extend(["visual."])
         
-        # Convert vision weights dtype if needed for GPU compatibility
-        def convert_vision_weights(weights_iter):
-            for name, weight in weights_iter:
-                # Check if this is a vision weight and needs dtype conversion
-                if (name.startswith("visual.") and 
-                    self.visual is not None and 
-                    hasattr(self.visual, '_vision_dtype') and 
-                    self.visual._vision_dtype == torch.float32 and 
-                    weight.dtype in (torch.bfloat16, torch.float16)):
-                    original_dtype = weight.dtype
-                    weight = weight.to(torch.float32)
-                    logger.info(f"Converting vision weight {name} from {original_dtype} to float32 for GPU compatibility")
-                yield name, weight
-        
         loader = AutoWeightsLoader(self, skip_prefixes=skip_prefixes)
-        return loader.load_weights(convert_vision_weights(weights), mapper=self.hf_to_vllm_mapper)
+        return loader.load_weights(weights, mapper=self.hf_to_vllm_mapper)
 
     def get_mm_mapping(self) -> MultiModelKeys:
         """
