@@ -51,6 +51,9 @@ from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.sequence import IntermediateTensors
 
 from .interfaces import SupportsEagle3, SupportsLoRA, SupportsPP
+from .mistral_sliding_window import (enhance_mistral_config_for_sliding_window,
+                                     get_optimal_sliding_window_backend,
+                                     should_use_xformers_for_mistral)
 from .utils import (AutoWeightsLoader, PPMissingLayer, extract_layer_index,
                     is_pp_missing_parameter,
                     make_empty_intermediate_tensors_factory, make_layers,
@@ -515,6 +518,11 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA, SupportsPP, SupportsEagle3):
         config = vllm_config.model_config.hf_config
         quant_config = vllm_config.quant_config
         lora_config = vllm_config.lora_config
+        
+        # Enhance Mistral config for sliding window attention if applicable
+        if hasattr(config, 'model_type') and config.model_type == 'mistral':
+            config = enhance_mistral_config_for_sliding_window(config)
+        
         self.config = config
         self.lora_config = lora_config
 
